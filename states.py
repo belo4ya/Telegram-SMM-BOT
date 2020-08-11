@@ -14,5 +14,6 @@ class MenuStates(StatesGroup):
     EDIT_URL = State()
 
     MY_TASKS = State()
+
     ARCHIVE_TASKS = State()
     SETTINGS = State()

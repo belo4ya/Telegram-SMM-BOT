@@ -4,7 +4,6 @@ import re
 import datetime
 import time
 import os
-from copy import copy
 import asyncio
 
 from aiogram import Bot, Dispatcher, executor, types
@@ -15,7 +14,7 @@ import requests
 import pytz
 
 from states import MenuStates
-from markups import office, back, edit_post
+from markups import office, back, edit_post, action_post
 from db import DataBase
 
 # Timezone
@@ -44,7 +43,8 @@ header_template = '<b>{}</b>\n' \
                   '<code>Адресаты:</code>   {}\n' \
                   '<code>Количество:</code>   {}\n' \
                   '<code>Интервал:</code>   {}\n' \
-                  '<code>Время выполнения:</code>   {} ч {} мин'
+                  '<code>Время выполнения:</code>   {} ч {} мин\n' \
+                  '<code>Начало выполнения:   {}</code>'
 
 
 async def shutdown(dispatcher: Dispatcher):
@@ -58,7 +58,10 @@ async def shutdown(dispatcher: Dispatcher):
 @dp.message_handler(commands=['start'], state='*')
 async def cmd_start(message: types.Message, state: FSMContext):
     text = 'Главное меню'
-    await state.update_data(message=[text])
+    async with state.proxy() as data:
+        data['post'] = {'text': '', 'img': '', 'urls': '', 'markup': ''}
+        data['header'] = {'name': '', 'channels': '', 'count': '', 'interval': '', 'text': ''}
+        data['message'] = [text]
     await MenuStates.OFFICE.set()
     await message.answer(text, reply_markup=office())
 
@@ -127,6 +130,7 @@ async def get_my_tasks(message: types.Message, state: FSMContext):
     text = 'Ваши Таски:'
     async with state.proxy() as data:
         data['message'].append(text)
+        data['data'] = {}
 
     tasks = db.get_my_tasks(message.from_user.id)
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, selective=True)
@@ -168,11 +172,14 @@ async def get_settings(message: types.Message):
 # ================================ CREATE =================================== #
 @dp.message_handler(content_types=types.ContentType.TEXT, state=MenuStates.CREATE_NAME)
 async def create_name(message: types.Message, state: FSMContext):
-    text = f'<b>{message.text[:16]}</b>\nВведите каналы через пробел:\n' \
+    text = f'<b>{message.text[:16].upper()}</b>\nВведите каналы через пробел:\n' \
            f'(@channel_1 @channel_2 @channel_3 ... @channel_51)\n'
     async with state.proxy() as data:
         data['message'].append(text)
-        data['header']['name'] = message.text[:16]
+        if db.task_in(message.from_user.id, message.text[:16]):
+            data['header']['name'] = message.text[:16] + f'_{db.get_last_task_id(message.from_user.id)[0]}'
+        else:
+            data['header']['name'] = message.text[:16]
 
     await MenuStates.CREATE_CHANNEL.set()
     await message.answer(text)
@@ -183,7 +190,8 @@ async def create_channel_with_message(message: types.Message, state: FSMContext)
     channel_names = list(sorted(set(re.findall(r'@\w{5,}\b', message.text))))
     await state.update_data(channel_names=list(channel_names))
     async with state.proxy() as data:
-        header = header_template.format(data["header"]["name"], ', '.join(channel_names), '-', '-', '-', '-')
+        header = header_template.format(data["header"]["name"].upper(),
+                                        ', '.join(channel_names), '-', '-', '-', '-', '-')
         text = 'Для установки настроек отправьте строку формата:\n' \
                '<code>M-N</code>, где <code>M</code> - временной ' \
                'интервал в минутах, <code>N</code> - кол-во постов\n\n' \
@@ -212,12 +220,13 @@ async def set_time_params(message: types.Message, state: FSMContext):
             data['header']['count'] = int(count)
             data['header']['interval'] = int(interval)
             data['message'].append(text)
-            header = header_template.format(data["header"]["name"],
+            header = header_template.format(data["header"]["name"].upper(),
                                             ', '.join(data["header"]["channels"]),
                                             data["header"]["count"],
                                             data["header"]["interval"],
                                             (data["header"]["count"] - 1) * data["header"]["interval"] // 60,
-                                            (data["header"]["count"] - 1) * data["header"]["interval"] % 60)
+                                            (data["header"]["count"] - 1) * data["header"]["interval"] % 60,
+                                            '-')
             data['header']['text'] = header
 
         await MenuStates.CREATE_CONTENT.set()
@@ -398,7 +407,7 @@ async def save_post(callback: types.CallbackQuery, state: FSMContext):
     await save_task_to_database(data, callback)
 
     await state.reset_data()
-    await state.update_data(message=[text])
+    await state.update_data(message=[])
     await MenuStates.OFFICE.set()
     await bot.delete_message(chat_id=callback.message.chat.id, message_id=callback.message.message_id - 1)
     await bot.delete_message(chat_id=callback.message.chat.id, message_id=callback.message.message_id)
@@ -410,20 +419,106 @@ async def save_post(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query_handler(lambda callback: callback.data == 'run', state=MenuStates.CONTENT_SETTINGS)
 async def run_post(callback: types.CallbackQuery, state: FSMContext):
     text = 'Task выполняется. Следить за его прогрессом можно в разделе My Tasks'
-
-    data = await state.get_data()
-    task_data = await save_task_to_database(data, callback, flag='work')
+    task_data = await state.get_data()
+    task_data = await save_task_to_database(task_data, callback, flag='work')
 
     t = bot.loop.create_task(launch_posting(task_data['name'], task_data))
     task_list[task_data['name']] = t
 
     await state.reset_data()
-    await state.update_data(message=[text])
+    await state.update_data(message=[])
     await MenuStates.OFFICE.set()
     await bot.delete_message(chat_id=callback.message.chat.id, message_id=callback.message.message_id - 1)
     await bot.delete_message(chat_id=callback.message.chat.id, message_id=callback.message.message_id)
     await callback.message.answer(text, reply_markup=office())
+
+
+@dp.callback_query_handler(lambda callback: callback.data == 'run', state=MenuStates.MY_TASKS)
+async def run_post(callback: types.CallbackQuery, state: FSMContext):
+    text = 'Task выполняется. Следить за его прогрессом можно в разделе My Tasks'
+    task_data = await state.get_data()
+    task_data = task_data['data']
+
+    t = bot.loop.create_task(launch_posting(task_data['name'], task_data))
+    task_list[task_data['name']] = t
+
+    await state.reset_data()
+    await state.update_data(message=[])
+    await bot.delete_message(chat_id=callback.message.chat.id, message_id=callback.message.message_id - 1)
+    await bot.delete_message(chat_id=callback.message.chat.id, message_id=callback.message.message_id)
+    await callback.message.answer(text)
 # ================================ RUN =================================== #
+
+
+# ================================ DELAY =================================== #
+# TODO
+# ================================ DELAY =================================== #
+
+
+# ================================ DELETE =================================== #
+@dp.callback_query_handler(lambda callback: callback.data == 'del', state=MenuStates.CONTENT_SETTINGS)
+async def del_post(callback: types.CallbackQuery, state: FSMContext):
+    task_data = await state.get_data()
+    text = f'Task <b>{task_data["header"]["name"]}</b> успешно удалён!'
+
+    await state.reset_data()
+    await state.update_data(message=[])
+    await MenuStates.OFFICE.set()
+    await bot.delete_message(chat_id=callback.message.chat.id, message_id=callback.message.message_id - 1)
+    await bot.delete_message(chat_id=callback.message.chat.id, message_id=callback.message.message_id)
+    await callback.message.answer(text, reply_markup=office())
+
+
+@dp.callback_query_handler(lambda callback: callback.data == 'del', state=MenuStates.MY_TASKS)
+async def del_post(callback: types.CallbackQuery, state: FSMContext):
+    task_data = await state.get_data()
+    task_data = task_data['data']
+    text = f'Task <b>{task_data["name"]}</b> успешно удалён!'
+
+    task = task_list.pop(task_data['name'])
+    task.cancel()
+    db.remove_task(callback.from_user.id, task_data['name'])
+
+    await state.reset_data()
+    await state.update_data(message=[])
+    await bot.delete_message(chat_id=callback.message.chat.id, message_id=callback.message.message_id - 1)
+    await bot.delete_message(chat_id=callback.message.chat.id, message_id=callback.message.message_id)
+    await callback.message.answer(text)
+# ================================ DELETE =================================== #
+
+
+# ================================ MY TASKS =================================== #
+@dp.message_handler(lambda message: message.text, state=MenuStates.MY_TASKS)
+async def show_task(message: types.Message, state: FSMContext):
+    data = db.get_task_data(message.from_user.id, name=message.text[1:])
+    async with state.proxy() as state_data:
+        state_data['data'] = data
+
+    header = header_template.format(
+        data["name"].upper(),
+        ', '.join(data["channels"]),
+        data["count"],
+        data["interval"],
+        (data["count"] - 1) * data["interval"] // 60,
+        (data["count"] - 1) * data["interval"] % 60,
+        data["time_start"]
+    )
+    text = data['text'] + data['img']
+    if data['urls']:
+        markup = await join_markups(data['urls'], action_post(data['flag']))
+    else:
+        markup = action_post(data['flag'])
+
+    await message.answer(header)
+    await message.answer(text, reply_markup=markup)
+# ================================ MY TASKS =================================== #
+
+
+# ================================ ARCHIVE TASKS =================================== #
+@dp.message_handler(lambda message: message.text, state=MenuStates.ARCHIVE_TASKS)
+async def show_task(message: types.Message, state: FSMContext):
+    pass
+# ================================ ARCHIVE TASKS =================================== #
 
 
 # =================================================================== #
@@ -463,11 +558,11 @@ async def launch_posting(name, data=None):
     interval = data['interval']
     channels = data['channels']
     text = data['text'] + data['img']
-    markup = data['urls'] or None
+    urls = data['urls'] or None
     while count:
         for channel in channels:
             try:
-                await bot.send_message(channel, text, reply_markup=markup)
+                await bot.send_message(channel, text, reply_markup=urls)
             except (Unauthorized, ChatNotFound):
                 pass
         if count != 1:

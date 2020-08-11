@@ -21,11 +21,12 @@ class Task(Base):
     time_start = Column(DateTime, comment='время отправки первого поста')
     flag = Column(String, comment='sleep, work, delay, archived')
 
-    name = Column(String, comment='имя поста')
+    name = Column(String, comment='имя поста', unique=True)
     text = Column(String, comment='текст поста')
     img = Column(String, comment='ссылка на картинку')
     urls = Column(Binary, comment='url-кнопки')
 
     def __repr__(self):
         return f'<Task(id="{self.id}", name="{self.name}", ' \
-               f'user_id="{self.user_id}", text="{self.text}", flag="{self.flag}")>'
+               f'user_id="{self.user_id}", text="{self.text}", flag="{self.flag}", ' \
+               f'count="{self.count}")>'
