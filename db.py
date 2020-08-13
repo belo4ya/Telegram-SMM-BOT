@@ -3,6 +3,7 @@ from sqlalchemy.orm.session import sessionmaker
 
 import pickle
 import configparser
+from datetime import timedelta
 from models import Task
 
 config = configparser.ConfigParser()
@@ -18,10 +19,7 @@ class DataBase:
     PASSWORD = config['DataBase']['password']
 
     def __init__(self):
-        self.engine = create_engine(
-            f"{self.DATABASE}://{self.USER}:{self.PASSWORD}@{self.HOST}/{self.DB_NAME}",
-            echo=True
-        )
+        self.engine = create_engine(f"{self.DATABASE}://{self.USER}:{self.PASSWORD}@{self.HOST}/{self.DB_NAME}")
         self.session = sessionmaker(bind=self.engine)()
 
     def _create_tables_from_models(self):
@@ -46,7 +44,7 @@ class DataBase:
 
     def get_archived_tasks(self, user_id):
         return self.session.query(Task).filter(Task.user_id == user_id, Task.flag == 'archived').\
-            order_by(Task.date_add.desc()).all()
+            order_by(Task.date_add.desc()).all()[:10]
 
     def get_task_data(self, user_id, name=None):
         task = self._get_task(user_id, name)
@@ -56,7 +54,7 @@ class DataBase:
                 'channels': pickle.loads(task.channels),
                 'count': task.count,
                 'interval': task.interval,
-                'time_start': task.time_start,
+                'time_start': task.time_start + timedelta(hours=3),
                 'flag': task.flag,
 
                 'name': task.name,
@@ -67,8 +65,16 @@ class DataBase:
             return data
         return None
 
-    def edit_task(self, user_id, name=None, **kwargs):
-        task = self._get_task(user_id, name)
+    def edit_task(self, **kwargs):
+        task = self._get_task(kwargs['user_id'], kwargs['name'])
+        try:
+            kwargs['channels'] = pickle.dumps(kwargs['channels'])
+        except KeyError:
+            pass
+        try:
+            kwargs['urls'] = pickle.dumps(kwargs['urls'])
+        except KeyError:
+            pass
         for k, v in kwargs.items():
             setattr(task, k, v)
         self.session.commit()
@@ -89,6 +95,17 @@ class DataBase:
 
     def remove_task(self, user_id,  name):
         self.session.query(Task).filter_by(user_id=user_id, name=name).delete()
+        self.session.commit()
+
+    def cleaning(self):
+        users = self.session.query(Task.user_id.distinct()).all()
+        for user in users:
+            tasks = self.session.query(Task.name).filter_by(user_id=user[0], flag='archived').\
+                order_by(Task.date_add.desc()).offset(10).all()
+            if tasks:
+                for task in tasks:
+                    self.session.query(Task).filter_by(name=task[0]).delete()
+
         self.session.commit()
 
     def show_table(self):

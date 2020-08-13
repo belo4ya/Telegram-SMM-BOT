@@ -12,6 +12,7 @@ class MenuStates(StatesGroup):
     CONTENT_SETTINGS = State()
     EDIT_IMG = State()
     EDIT_URL = State()
+    EDIT_DELAY = State()
 
     MY_TASKS = State()
 
