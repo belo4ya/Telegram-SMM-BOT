@@ -3,7 +3,6 @@ from sqlalchemy.orm.session import sessionmaker
 
 import pickle
 import configparser
-from datetime import timedelta
 from models import Task
 
 config = configparser.ConfigParser()
@@ -21,6 +20,10 @@ class DataBase:
     def __init__(self):
         self.engine = create_engine(f"{self.DATABASE}://{self.USER}:{self.PASSWORD}@{self.HOST}/{self.DB_NAME}")
         self.session = sessionmaker(bind=self.engine)()
+
+    def _remove_task_table(self):
+        from models import Base
+        Base.metadata.drop_all(bind=self.engine, tables=[Task.__table__])
 
     def _create_tables_from_models(self):
         from models import Base
@@ -54,7 +57,7 @@ class DataBase:
                 'channels': pickle.loads(task.channels),
                 'count': task.count,
                 'interval': task.interval,
-                'time_start': task.time_start + timedelta(hours=3),
+                'time_start': task.time_start,
                 'flag': task.flag,
 
                 'name': task.name,
@@ -115,4 +118,5 @@ class DataBase:
 if __name__ == '__main__':
     db = DataBase()
     # db._create_tables_from_models()
+    # db._remove_task_table()
     print(db.show_table())

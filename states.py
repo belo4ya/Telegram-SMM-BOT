@@ -1,20 +1,25 @@
 from aiogram.dispatcher.filters.state import State, StatesGroup
 
 
-class MenuStates(StatesGroup):
+class States(StatesGroup):
 
     OFFICE = State()
 
-    CREATE_NAME = State()
-    CREATE_CHANNEL = State()
-    CREATE_TIME_PARAMS = State()
+    # Task
+    CREATE_TASK = State()
     CREATE_CONTENT = State()
-    CONTENT_SETTINGS = State()
+    TASK_SETTINGS = State()
+
+    # Header
+    EDIT_CHANNELS = State()
+    EDIT_COUNT = State()
+    EDIT_INTERVAL = State()
+
+    # Post
     EDIT_IMG = State()
     EDIT_URL = State()
     EDIT_DELAY = State()
 
     MY_TASKS = State()
-
     ARCHIVE_TASKS = State()
     SETTINGS = State()

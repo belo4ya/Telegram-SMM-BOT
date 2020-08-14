@@ -1,5 +1,5 @@
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, String, Binary, DateTime
+from sqlalchemy import Column, Integer, String, Binary, DateTime, Enum
 from datetime import datetime
 
 Base = declarative_base()
@@ -14,8 +14,8 @@ class Task(Base):
     channels = Column(Binary, comment='адресаты')
     count = Column(Integer, comment='кол-во')
     interval = Column(Integer, comment='интервал')
-    time_start = Column(DateTime, comment='время отправки первого поста', default=datetime.utcnow())
-    flag = Column(String, comment='sleep, work, delay, archived')
+    time_start = Column(DateTime, comment='время отправки первого поста')
+    flag = Column(Enum('sleep', 'work', 'delay', 'archived', name='states'), comment='sleep, work, delay, archived')
 
     name = Column(String, comment='имя поста', unique=True)
     text = Column(String, comment='текст поста')
