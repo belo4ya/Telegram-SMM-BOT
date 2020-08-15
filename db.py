@@ -119,4 +119,4 @@ if __name__ == '__main__':
     db = DataBase()
     # db._create_tables_from_models()
     # db._remove_task_table()
-    print(db.show_table())
+    db.show_table()

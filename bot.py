@@ -7,7 +7,8 @@ import asyncio
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.dispatcher import FSMContext
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
-from aiogram.utils.exceptions import ButtonURLInvalid, Unauthorized, ChatNotFound, MessageNotModified
+from aiogram.utils.exceptions import ButtonURLInvalid, Unauthorized,\
+    ChatNotFound, MessageNotModified, MessageCantBeEdited
 
 import requests
 from states import States
@@ -113,6 +114,7 @@ async def get_my_tasks(message: types.Message, state: FSMContext):
     text = 'Ваши Таски:'
     async with state.proxy() as data:
         data['message'].append(text)
+        data['offset'] = 0
 
     tasks = db.get_my_tasks(message.from_user.id)
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, selective=True)
@@ -481,13 +483,13 @@ async def add_delay(callback: types.CallbackQuery):
            'Формат сообщения: <code>HH:MM dd.mm.yy</code>'
     await States.EDIT_DELAY.set()
     await bot.edit_message_text(text=text, chat_id=callback.message.chat.id,
-                                message_id=callback.message.message_id - 1)
+                                message_id=callback.message.message_id)
 
 
 @dp.callback_query_handler(lambda callback: callback.data == 'del_delay', state=States.TASK_SETTINGS)
 async def del_delay(callback: types.CallbackQuery, state: FSMContext):
     async with state.proxy() as data:
-        data['post']['time_start'] = ''
+        data['post']['time_start'] = None
         data['post']['flag'] = ''
         header = get_header(data['post'])
         header_keyboard = edit_header_keyboard(data['post'])
@@ -543,7 +545,7 @@ async def error_delay(message: types.Message, state: FSMContext):
     await message.delete()
     try:
         await bot.edit_message_text(text=text, chat_id=message.chat.id,
-                                    message_id=message.message_id - (2 + offset))
+                                    message_id=message.message_id - (1 + offset))
     except MessageNotModified:
         return
 # ================================ DELAY =================================== #
@@ -602,6 +604,29 @@ async def run_post(callback: types.CallbackQuery, state: FSMContext):
 # ================================ RUN =================================== #
 
 
+# ================================ STOP =================================== #
+@dp.callback_query_handler(lambda callback: callback.data == 'stop', state=States.MY_TASKS)
+async def stop_post(callback: types.CallbackQuery, state: FSMContext):
+    async with state.proxy() as data:
+        data['post']['flag'] = 'sleep'
+        data['post']['time_start'] = None
+        db.edit_task(user_id=data['post']['user_id'], name=data['post']['name'],
+                     flag=data['post']['flag'], time_start=data['post']['time_start'])
+        t = task_list.pop(data['post']['name'], None)
+        if t:
+            t.cancel()
+        text = get_text_with_img(data['post'])
+        post_keyboard = action_post_keyboard(data['post'])
+        header = get_header(data['post'])
+        header_keyboard = edit_header_keyboard(data['post'])
+
+    await bot.edit_message_text(text=header, chat_id=callback.message.chat.id,
+                                message_id=callback.message.message_id - 1, reply_markup=header_keyboard)
+    await bot.edit_message_text(text=text, chat_id=callback.message.chat.id,
+                                message_id=callback.message.message_id, reply_markup=post_keyboard)
+# ================================ STOP =================================== #
+
+
 # ================================ DELETE =================================== #
 @dp.callback_query_handler(lambda callback: callback.data == 'del',
                            state=[States.TASK_SETTINGS, States.MY_TASKS])
@@ -628,13 +653,35 @@ async def del_post(callback: types.CallbackQuery, state: FSMContext):
 async def show_task(message: types.Message, state: FSMContext):
     task_data = db.get_task_data(message.from_user.id, name=message.text[1:])
     async with state.proxy() as data:
+        offset = data['offset']
+        data['offset'] += 1
         data['post'] = task_data
+        header = get_header(data['post'])
         text = get_text_with_img(data['post'])
         post_keyboard = action_post_keyboard(data['post'])
-        header = get_header(data['post'])
+        if data['post']['flag'] == 'sleep':
+            header_keyboard = edit_header_keyboard(data['post'])
+        else:
+            header_keyboard = None
 
-    await message.answer(header)
-    await message.answer(text, reply_markup=post_keyboard)
+    await message.delete()
+    try:
+        await bot.edit_message_text(text=header, chat_id=message.chat.id,
+                                    message_id=message.message_id - (2 + offset), reply_markup=header_keyboard)
+    except MessageCantBeEdited:
+        await message.answer(text=header, reply_markup=header_keyboard)
+        async with state.proxy() as data:
+            data['offset'] -= 1
+    except MessageNotModified:
+        pass
+
+    try:
+        await bot.edit_message_text(text=text, chat_id=message.chat.id,
+                                    message_id=message.message_id - (1 + offset), reply_markup=post_keyboard)
+    except MessageCantBeEdited:
+        await message.answer(text=text, reply_markup=post_keyboard)
+    except MessageNotModified:
+        return
 # ================================ MY TASKS =================================== #
 
 
@@ -686,17 +733,6 @@ def get_text_with_img(data):
     return data['text'] + data['img']
 
 
-async def settings_error_input(message: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        text = get_text_with_img(data['post'])
-        post_keyboard = edit_post_keyboard(data['post'])
-        header = get_header(data['post'])
-
-    await States.TASK_SETTINGS.set()
-    await message.answer(header)
-    await message.answer(text, reply_markup=post_keyboard)
-
-
 async def launch_posting(data):
     user_id = data['user_id']
     name = data['name']
@@ -711,10 +747,10 @@ async def launch_posting(data):
                 await bot.send_message(channel, text, reply_markup=urls)
             except (Unauthorized, ChatNotFound):
                 pass
-        if count != 1:
-            await asyncio.sleep(interval * 60 - 3)
         db.decrement_counter(user_id, name)
         count -= 1
+        if count != 1:
+            await asyncio.sleep(interval)  # TODO: interval * 60 - 3
 
     task_list.pop(name)
     db.edit_task(user_id=user_id, name=name, flag='archived')
@@ -738,5 +774,5 @@ async def database_cleaner():
 
 
 if __name__ == '__main__':
-    bot.loop.create_task(database_cleaner())
+    # bot.loop.create_task(database_cleaner())
     executor.start_polling(dp, skip_updates=True, on_shutdown=shutdown)

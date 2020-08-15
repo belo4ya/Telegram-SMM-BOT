@@ -78,6 +78,7 @@ def edit_post_keyboard(data):
 def action_post_keyboard(data):
     keyboard = types.InlineKeyboardMarkup()
     run = types.InlineKeyboardButton(text='Выполнить', callback_data='run')
+    stop = types.InlineKeyboardButton(text='Остановить', callback_data='stop')
     delete = types.InlineKeyboardButton(text='Удалить', callback_data='del')
 
     if data['urls']:
@@ -89,6 +90,8 @@ def action_post_keyboard(data):
 
     if data['flag'] == 'sleep':
         keyboard.add(run)
+    elif data['flag'] in ['delay', 'work']:
+        keyboard.add(stop)
 
     keyboard.add(delete)
     return keyboard
