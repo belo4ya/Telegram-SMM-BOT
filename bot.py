@@ -71,6 +71,7 @@ async def cmd_help(message: types.Message):
 
 @dp.message_handler(lambda message: message.text == '🔙Назад', state='*')
 async def cmd_back(message: types.Message, state: FSMContext):
+    keyboard = None
     current_state = await state.get_state()
     if current_state in [
         States.OFFICE.state,
@@ -750,7 +751,7 @@ async def launch_posting(data):
         db.decrement_counter(user_id, name)
         count -= 1
         if count != 1:
-            await asyncio.sleep(interval)  # TODO: interval * 60 - 3
+            await asyncio.sleep(interval * 60 - 3)
 
     task_list.pop(name)
     db.edit_task(user_id=user_id, name=name, flag='archived')
