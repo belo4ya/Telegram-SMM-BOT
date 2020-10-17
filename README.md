@@ -1,5 +1,6 @@
 # Telegram SMM BOT
 _удобный инструмент для администраторов telegram-каналов_
+[![CodeFactor](https://www.codefactor.io/repository/github/belo4ya/telegram-smm-bot/badge)](https://www.codefactor.io/repository/github/belo4ya/telegram-smm-bot)
 ### Что умеет бот:
 - Создание поста с картинкой
 - Создание поста с внешними ссылками под постом
